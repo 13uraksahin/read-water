@@ -1,0 +1,86 @@
+# Read Water - Docker Compose Configuration
+# High-performance, multi-tenant water meter reading platform
+
+services:
+  # =============================================================================
+  # TimescaleDB - PostgreSQL with TimescaleDB extension for time-series data
+  # =============================================================================
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: readwater-timescaledb
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-readwater}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-readwater_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-readwater}
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-readwater} -d ${POSTGRES_DB:-readwater}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - readwater-network
+
+  # =============================================================================
+  # Redis - Caching, Queue Management (BullMQ), and Socket.IO Adapter
+  # =============================================================================
+  redis:
+    image: redis:latest
+    container_name: readwater-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - readwater-network
+
+  # =============================================================================
+  # RedisInsight - Redis GUI (Development Only)
+  # =============================================================================
+  redis-insight:
+    image: redislabs/redisinsight:latest
+    container_name: readwater-redis-insight
+    restart: unless-stopped
+    ports:
+      - "${REDIS_INSIGHT_PORT:-5540}:5540"
+    volumes:
+      - redis_insight_data:/data
+    depends_on:
+      - redis
+    networks:
+      - readwater-network
+    profiles:
+      - dev
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  readwater-network:
+    driver: bridge
+    name: readwater-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  timescaledb_data:
+    name: readwater-timescaledb-data
+  redis_data:
+    name: readwater-redis-data
+  redis_insight_data:
+    name: readwater-redis-insight-data
+
