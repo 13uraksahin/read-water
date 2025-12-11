@@ -190,6 +190,9 @@ Start by setting up the **Project Structure** and **Docker Compose**.
 
 **Hints of Fields:**
 Below is the raw structure so that this structure can be understood much more deeply:
+All-in-One Remote Water Meter Reading
+
+Structure
 1. Dashboard
     1. Map
         1. Meters
@@ -255,7 +258,7 @@ Below is the raw structure so that this structure can be understood much more de
                 7. Customer contact phone number
                 8. Customer contact email
         5. Other details if needed
-4. Meters
+4. Meters (Assets)
     1. Dashboard
         1. All meters table (Filterable by Tenant, Status, Brand)
     2. Selected meter detail
@@ -270,22 +273,16 @@ Below is the raw structure so that this structure can be understood much more de
         4. Initial Index
         5. Installation Date (DD.MM.YYYY HH:mm:ss -> 08.12.2025 07:18:55)(24 hours and no am/pm)
         6. Meter Status (from 6.12: Definitions -> Meter Statuses)
-        7. WAN Connectivity
-            1. Primary
-                1. Communication Technology
-                    1. Fields must be dynamically generated from selected technology (from 5.20.#.1: Profiles -> Communication Technologies -> _selected one_ -> Fields)
-            2. Secondary
-                1. Communication Technology
-                    1. Fields must be dynamically generated from selected technology (from 5.20.#.1: Profiles -> Communication Technologies -> _selected one_ -> Fields)
-        8. Other Technologies
-            1. Communication Technologies[] (array)
-                1. Selected Technology (Fields must be dynamically generated from selected technology (from 5.20.#.1: Profiles -> Communication Technologies -> _selected one_ -> Fields))
-            2. … (repeated by how many of the existed technology selected)
-        9. Address details (from 8.1: Shared Entities -> Addresses)
-        10. Latitude
-        11. Longitude
-        12. TC Address Code
-        13. Tenant (from 10.1: IAM -> Tenants)
+        7. Address details (from 8.1: Shared Entities -> Addresses)
+        8. Latitude
+        9. Longitude
+        10. TC Address Code
+        11. Tenant (from 10.1: IAM -> Tenants)
+        12. Communication Module (Can overwrite the profile)
+        13. Device Configurations
+            1. None
+            2. Select From Inventory
+            3. Create New
 5. Profiles
     1. Meter Profiles
         1. Brand (from 6.7: Definitions -> Brands)
@@ -307,23 +304,7 @@ Below is the raw structure so that this structure can be understood much more de
         17. Pressure Loss
         18. IP Rating (from 6.13: Definitions -> IP Ratings)
         19. Communication Module (from 6.6: Definitions -> Communication Modules)
-        20. Communication Technologies (from 6.8: Definitions -> Communication Technologies)
-            1. Sigfox
-                1. Fields (Must be dynamically added while adding meters)(from 6.8.1.1: Definitions -> Communication technologies -> Sigfox -> Fields while adding meters)
-                2. Decoder function (JS expressions)
-            2. LoRaWAN
-                1. Fields (Must be dynamically added while adding meters)(from 6.8.2: Definitions -> Communication technologies -> LoRaWAN -> Fields while adding meters)
-                2. Decoder function (JS expressions)
-            3. NB-IoT
-                1. Fields (Must be dynamically added while adding meters)(from 6.8.2: Definitions -> Communication technologies -> LoRaWAN -> Fields while adding meters)
-                2. Decoder function (JS expressions)
-            4. …
-            5. …
-            6. …
-            7. …
-            8. …
-            9. …
-        21. Battery Life (If communication module is not none)
+        20. Compatible Device Profiles (From 12: Device Profiles)
 6. Definitions
     1. Meter Types
         1. Single Jet
@@ -447,6 +428,13 @@ Below is the raw structure so that this structure can be understood much more de
         13. reading.read
         14. reading.export
         15. valve.control
+    16. Device Statuses
+        1. Active
+        2. Passive
+        3. Warehouse
+        4. Maintenance
+        5. Planned
+        6. Deployed but not started
 7. Settings
     1. Domain
     2. HTTP Callback URL
@@ -521,3 +509,70 @@ Below is the raw structure so that this structure can be understood much more de
         3. Operator (meter.create, meter.read, meter.update, reading.read, Cannot delete)
         4. Viewer (*.read)
         5. Field Engineer (meter.update (Installation date, location), meter.read)
+11. Devices
+    1. Tenants
+    2. Serial No
+    3. Related meter
+    4. Device Statuses (from 6.16: -> Definitions -> Device Statuses)
+    5. Device Profiles (from 12: Device Profiles)
+    6. Dynamic fields (from 12.3: Device Profiles -> Communication Technologies)
+12. Device Profiles
+    1. Device Brand (from 13)
+    2. Model Code (Device Brand + Model Code must be unique)
+    3. Communication Technologies (from 6.8: Definitions -> Communication Technologies)
+        1. Sigfox
+            1. Fields (Must be dynamically added while adding meters)(from 6.8.1.1: Definitions -> Communication technologies -> Sigfox -> Fields while adding meters)
+            2. Decoder function (JS expressions)
+        2. LoRaWAN
+            1. Fields (Must be dynamically added while adding meters)(from 6.8.2: Definitions -> Communication technologies -> LoRaWAN -> Fields while adding meters)
+            2. Decoder function (JS expressions)
+        3. NB-IoT
+            1. Fields (Must be dynamically added while adding meters)(from 6.8.2: Definitions -> Communication technologies -> LoRaWAN -> Fields while adding meters)
+            2. Decoder function (JS expressions)
+        4. …
+        5. …
+        6. …
+        7. …
+        8. …
+        9. …
+    4. Battery Life (If communication module is not none)
+13. Device Brands
+    1. Una
+    2. Ima
+    3. Itron
+    4. Zenner
+
+Relations & Logic
+1. Tenants
+    1. A tenant must have a parent tenant (if it is not the root tenant)
+    2. A tenant can have multiple child tenants
+    3. A tenant can have multiple customers
+    4. A tenant can have multiple users
+    5. Parent tenants can be able to manage child tenants
+    6. Child tenants must not be able to see its parent tenant or any same level sibling tenants.
+    7. Tenants can have multiple allowed meter profiles
+2. Users
+    1. A user must be related with tenants
+    2. A user can be related with different tenants
+    3. A user must have at least and only 1 role for each tenant
+    4. An authorized user of a tenant can be able to manage all of its child tenants
+    5. A user must not be able to see its parent tenant or any of same level sibling tenants
+3. Customers
+    1. A customer must be related with at least and only 1 tenant
+    2. A customer can have n addresses
+    3. A customer can have n meters
+4. Meter Profiles
+    1. A meter profile can be consumed by multiple meters
+    2. A meter profile view can be allowed for multiple tenants
+    3. A meter profile can have multiple compatible device profiles
+5. Meters (Assets)
+    1. A meter must be related with at least and only 1 customer (thus can only be related with only one tenant)
+    2. A meter must be related with at least and only 1 meter profiles
+    3. A meter may or may not be related with device (If related, only 1)
+6. Device Profiles
+    1. A device profile can have multiple devices
+    2. A device profile can have multiple compatible meter profiles
+7. Devices
+    1. A device must be related with at least and only 1 tenant
+    2. A device may or may not be related with a meter (If related, only 1)
+    3. A device must be related with at least 1 device profile
