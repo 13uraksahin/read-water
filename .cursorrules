@@ -576,3 +576,184 @@ Relations & Logic
     1. A device must be related with at least and only 1 tenant
     2. A device may or may not be related with a meter (If related, only 1)
     3. A device must be related with at least 1 device profile
+
+Seed 1
+1. Tenants
+    1. Root
+        1. ASKİ (Ankara Su İdaresi)
+        2. HATSU (Hatay Su İdaresi)
+2. Users
+    1. Super Admin
+        1. First Name: Super
+        2. Last Name: Admin
+        3. Email: super.admin@example.com
+        4. password: Asdf1234.
+        5. Phone: +909998887766
+        6. TC ID: 12345678901
+        7. Tenant:Role
+            1. Root:PlatformAdmin
+    2. Aski Yetkili
+        1. First Name: ASKİ
+        2. Last Name: Yetkili
+        3. Email: aski.yetkili@example.com
+        4. password: Asdf1234.
+        5. Phone: +908887776655
+        6. TC ID: 12345678902
+        7. Tenant:Role
+            1. ASKİ:TenantAdmin
+    3. Hatsu Yetkili
+        1. First Name: HATSU
+        2. Last Name: Yetkili
+        3. Email: hatsu.yetkili@example.com
+        4. password: Asdf1234.
+        5. Phone: +907776665544
+        6. TC ID: 12345678903
+        7. Tenant:Role
+            1. HATSU:TenantAdmin
+3. Meter Brands
+    1. Manas
+    2. Itron
+    3. Baylan
+    4. Cem
+    5. Klepsan
+    6. Zenner
+4. Device Brands
+    1. Manas
+    2. Itron
+    3. Baylan
+    4. Cem
+    5. Klepsan
+    6. Ima
+    7. Codigno
+5. Profiles
+    1. (Total 10) {qty} Meter Profiles | Compatible Device Profiles | Viewable by Tenants (Root is default and must)
+        1. 2 Manas | Manas + Itron + Ima + Codigno | HATSU
+        2. 2 Itron | Manas + Itron + Ima + Codigno | HATSU + ASKİ
+        3. 2 Baylan | Baylan + Ima | HATSU + ASKİ
+        4. 2 Zenner | Ima | HATSU
+        5. 1 Cem | Cem + Ima | HATSU
+        6. 1 Klepsan | Klepsan + Ima | HATSU
+    2. (Total 7) {qty} Device Profiles | Compatible Meter Profiles | Viewable by Tenants
+        1. 1 Manas | Manas + Itron | HATSU + ASKİ
+        2. 1 Itron | Manas + Itron | HATSU + ASKİ
+        3. 1 Baylan | Baylan | HATSU + ASKİ
+        4. 1 Cem | Cem | HATSU
+        5. 1 Klepsan | Klepsan | HATSU
+        6. 1 Ima | Manas + Itron + Baylan + Zenner + Cem + Klepsan | HATSU + ASKİ
+        7. 1 Codigno | Manas + Itron | HATSU + ASKİ
+6. Meters + Devices:
+    1. HATSU -> {qty} | meter profile[i] + device profile
+        1. 100 | Itron[0] + Itron
+        2. 50.000 | Baylan[0] + Baylan
+        3. 10.000 | Zenner[0] + Ima
+        4. 10.000 | Klepsan + Klepsan
+    2. ASKİ -> {qty} | meter profile[i] + device profile
+        1. 1.000 | Manas[0] + Itron
+        2. 100 | Manas[0] + Ima
+        3. 1.000 | Manas[1] + Itron
+        4. 100 | Manas[1] + Ima
+        5. 1.000 | Itron[0] + Itron
+        6. 100 | Itron[0] + Ima
+        7. 1.000 | Itron[1] + Itron
+        8. 100 | Itron[1] + Ima
+        9. 1.000 | Baylan[0] + Baylan
+        10. 1.000 | Baylan[1] + Baylan
+        11. 1.000 | Zenner[0] + Ima
+        12. 1.000 | Zenner[1] + Ima
+        13. 1.000 | Cem[0] + Cem
+7. Customer - Tenant
+    1. Kemalettin ŞAHİN - ASKİ
+        1. Meter 1 Address: Tepebaşı Mahallesi, Foça Sokak, No: 100/2, Keçiören/ANKARA, Türkiye (06390)
+        2. Meter 2 Address: Ehlibeyt Mahallesi, Tekstilciler Caddesi, No: 16/4, Çankaya/ANKARA, Türkiye (06520)
+    2. Realistic Random - Realistic Random (from 6: Meters + Devices)
+8. Live readings: Realistic Random (24 readings / day * 3 months * All devices)
+Seed 2
+1. Tenants
+    1. Root
+        1. ASKİ (Ankara Su İdaresi)
+        2. HATSU (Hatay Su İdaresi)
+2. Users
+    1. Super Admin
+        1. First Name: Super
+        2. Last Name: Admin
+        3. Email: super.admin@example.com
+        4. password: Asdf1234.
+        5. Phone: +909998887766
+        6. TC ID: 12345678901
+        7. Tenant:Role
+            1. Root:PlatformAdmin
+    2. Aski Yetkili
+        1. First Name: ASKİ
+        2. Last Name: Yetkili
+        3. Email: aski.yetkili@example.com
+        4. password: Asdf1234.
+        5. Phone: +908887776655
+        6. TC ID: 12345678902
+        7. Tenant:Role
+            1. ASKİ:TenantAdmin
+    3. Hatsu Yetkili
+        1. First Name: HATSU
+        2. Last Name: Yetkili
+        3. Email: hatsu.yetkili@example.com
+        4. password: Asdf1234.
+        5. Phone: +907776665544
+        6. TC ID: 12345678903
+        7. Tenant:Role
+            1. HATSU:TenantAdmin
+3. Meter Brands
+    1. Manas
+    2. Itron
+    3. Baylan
+    4. Cem
+    5. Klepsan
+    6. Zenner
+4. Device Brands
+    1. Manas
+    2. Itron
+    3. Baylan
+    4. Cem
+    5. Klepsan
+    6. Ima
+    7. Codigno
+5. Profiles
+    1. (Total 10) {qty} Meter Profiles | Compatible Device Profiles | Viewable by Tenants (Root is default and must)
+        1. 2 Manas | Manas + Itron + Ima + Codigno | HATSU
+        2. 2 Itron | Manas + Itron + Ima + Codigno | HATSU + ASKİ
+        3. 2 Baylan | Baylan + Ima | HATSU + ASKİ
+        4. 2 Zenner | Ima | HATSU
+        5. 1 Cem | Cem + Ima | HATSU
+        6. 1 Klepsan | Klepsan + Ima | HATSU
+    2. (Total 7) {qty} Device Profiles | Compatible Meter Profiles | Viewable by Tenants
+        1. 1 Manas | Manas + Itron | HATSU + ASKİ
+        2. 1 Itron | Manas + Itron | HATSU + ASKİ
+        3. 1 Baylan | Baylan | HATSU + ASKİ
+        4. 1 Cem | Cem | HATSU
+        5. 1 Klepsan | Klepsan | HATSU
+        6. 1 Ima | Manas + Itron + Baylan + Zenner + Cem + Klepsan | HATSU + ASKİ
+        7. 1 Codigno | Manas + Itron | HATSU + ASKİ
+6. Meters + Devices:
+    1. HATSU -> {qty} | meter profile[i] + device profile
+        1. 100 | Itron[0] + Itron
+        2. 100 | Baylan[0] + Baylan
+        3. 100 | Zenner[0] + Ima
+        4. 100 | Klepsan + Klepsan
+    2. ASKİ -> {qty} | meter profile[i] + device profile
+        1. 100 | Manas[0] + Itron
+        2. 100 | Manas[0] + Ima
+        3. 100 | Manas[1] + Itron
+        4. 100 | Manas[1] + Ima
+        5. 100 | Itron[0] + Itron
+        6. 100 | Itron[0] + Ima
+        7. 100 | Itron[1] + Itron
+        8. 100 | Itron[1] + Ima
+        9. 100 | Baylan[0] + Baylan
+        10. 100 | Baylan[1] + Baylan
+        11. 100 | Zenner[0] + Ima
+        12. 100 | Zenner[1] + Ima
+        13. 100 | Cem[0] + Cem
+7. Customer - Tenant
+    1. Kemalettin ŞAHİN - ASKİ
+        1. Meter 1 Address - Lat, Lig: Tepebaşı Mahallesi, Foça Sokak, No: 100/2, Keçiören/ANKARA, Türkiye (06390) - 39.99451679511336, 32.86308219026244
+        2. Meter 2 Address: Ehlibeyt Mahallesi, Tekstilciler Caddesi, No: 16/4, Çankaya/ANKARA, Türkiye (06520) - 39.89441311052211, 32.81460781844764
+    2. Realistic Random - Realistic Random (from 6: Meters + Devices)
+8. Live readings: Realistic Random (24 readings / day * 45 days * All devices)
