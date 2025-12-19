@@ -1,3 +1,11 @@
+## 0. AI Context & Navigation (Nuxt 4 Standards)
+*   **Documentation Map:** Before searching for files randomly, read `app/public/llms.txt`. This file contains the exact map of Pages, Stores, and Components.
+*   **MCP Usage:** Use the connected 'read-water-frontend-context' MCP server to read file contents securely.
+*   **Nuxt 4 Rules:**
+    *   Use `<script setup lang="ts">` syntax strictly.
+    *   Use auto-imports (do not manually import Vue functions like `ref`, `computed`).
+    *   Use `useRuntimeConfig()` for environment variables.
+
 ## 1. Project Context & Role
 *   **Role:** Act as a Senior Full Stack Software Architect and Lead Developer.
 *   **Project Name:** Read Water

@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "readwater-db": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://readwater:readwater_secret@localhost:5433/readwater"
+      ]
+    },
+    "nuxt": {
+      "type": "http",
+      "url": "https://nuxt.com/mcp"
+    }
+  }
+}
