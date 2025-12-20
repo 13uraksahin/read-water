@@ -1,0 +1,68 @@
+# =============================================================================
+# Read Water - Dokploy Override Configuration
+# =============================================================================
+# This file extends docker-compose.prod.yml with Traefik labels for Dokploy.
+# Use: docker compose -f docker-compose.prod.yml -f docker-compose.dokploy.yml up -d
+#
+# In Dokploy, you can use this as the compose file or configure domains via UI.
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # API with Traefik labels
+  # ===========================================================================
+  api:
+    labels:
+      - "traefik.enable=true"
+      # HTTP Router
+      - "traefik.http.routers.readwater-api.rule=Host(`${API_DOMAIN:-api.localhost}`)"
+      - "traefik.http.routers.readwater-api.entrypoints=websecure"
+      - "traefik.http.routers.readwater-api.tls.certresolver=letsencrypt"
+      # Service
+      - "traefik.http.services.readwater-api.loadbalancer.server.port=4000"
+      # WebSocket support for Socket.IO
+      - "traefik.http.middlewares.readwater-api-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
+      - "traefik.http.routers.readwater-api.middlewares=readwater-api-headers"
+    networks:
+      - readwater-network
+      - dokploy-network
+
+  # ===========================================================================
+  # App with Traefik labels
+  # ===========================================================================
+  app:
+    labels:
+      - "traefik.enable=true"
+      # HTTP Router
+      - "traefik.http.routers.readwater-app.rule=Host(`${APP_DOMAIN:-app.localhost}`)"
+      - "traefik.http.routers.readwater-app.entrypoints=websecure"
+      - "traefik.http.routers.readwater-app.tls.certresolver=letsencrypt"
+      # Service
+      - "traefik.http.services.readwater-app.loadbalancer.server.port=3000"
+    networks:
+      - readwater-network
+      - dokploy-network
+
+  # ===========================================================================
+  # Internal services (not exposed via Traefik)
+  # ===========================================================================
+  timescaledb:
+    labels:
+      - "traefik.enable=false"
+
+  redis:
+    labels:
+      - "traefik.enable=false"
+
+  migrations:
+    labels:
+      - "traefik.enable=false"
+
+# =============================================================================
+# Networks - Connect to Dokploy's network
+# =============================================================================
+networks:
+  dokploy-network:
+    external: true
+    name: dokploy-network
+

@@ -1,0 +1,166 @@
+# =============================================================================
+# Read Water - Production Docker Compose (Dokploy Ready)
+# =============================================================================
+# This configuration is optimized for Dokploy deployment.
+# Environment variables should be set in Dokploy's environment configuration.
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # TimescaleDB - PostgreSQL with TimescaleDB extension
+  # ===========================================================================
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: readwater-timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - readwater-network
+
+  # ===========================================================================
+  # Redis - Caching, Queue Management, Socket.IO Adapter
+  # ===========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: readwater-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD:-}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - readwater-network
+
+  # ===========================================================================
+  # API - NestJS Backend
+  # ===========================================================================
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: readwater-api
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB}?schema=public
+      
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      
+      # JWT
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-30d}
+      
+      # API
+      NODE_ENV: production
+      API_PORT: 4000
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      
+      # Queue
+      QUEUE_READINGS_CONCURRENCY: ${QUEUE_READINGS_CONCURRENCY:-10}
+    ports:
+      - "${API_PORT:-4000}:4000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:4000/api/v1/health', (r) => r.statusCode === 200 ? process.exit(0) : process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - readwater-network
+
+  # ===========================================================================
+  # App - Nuxt Frontend
+  # ===========================================================================
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+      args:
+        NUXT_PUBLIC_API_BASE: ${NUXT_PUBLIC_API_BASE}
+        NUXT_PUBLIC_SOCKET_URL: ${NUXT_PUBLIC_SOCKET_URL}
+    container_name: readwater-app
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NUXT_PUBLIC_API_BASE: ${NUXT_PUBLIC_API_BASE}
+      NUXT_PUBLIC_SOCKET_URL: ${NUXT_PUBLIC_SOCKET_URL}
+      NODE_ENV: production
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/_health', (r) => r.statusCode === 200 ? process.exit(0) : process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - readwater-network
+
+  # ===========================================================================
+  # Migrations - Run Prisma migrations on startup (one-time container)
+  # ===========================================================================
+  migrations:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: readwater-migrations
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB}?schema=public
+    command: ["npx", "prisma", "migrate", "deploy"]
+    networks:
+      - readwater-network
+    restart: "no"
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  readwater-network:
+    driver: bridge
+    name: readwater-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  timescaledb_data:
+    name: readwater-timescaledb-data
+  redis_data:
+    name: readwater-redis-data
+

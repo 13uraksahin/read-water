@@ -1,0 +1,42 @@
+{
+  "name": "readwater",
+  "version": "1.0.0",
+  "description": "Read Water - High-performance, multi-tenant remote water meter reading platform",
+  "private": true,
+  "scripts": {
+    "dev": "docker compose up -d && npm run dev:services",
+    "dev:services": "concurrently \"npm run dev:api\" \"npm run dev:app\"",
+    "dev:api": "cd api && npm run start:dev",
+    "dev:app": "cd app && npm run dev",
+    "build": "npm run build:api && npm run build:app",
+    "build:api": "cd api && npm run build",
+    "build:app": "cd app && npm run build",
+    "install:all": "npm install && cd api && npm install && cd ../app && npm install",
+    "docker:dev": "docker compose up -d",
+    "docker:dev:down": "docker compose down",
+    "docker:prod": "docker compose -f docker-compose.prod.yml up -d --build",
+    "docker:prod:down": "docker compose -f docker-compose.prod.yml down",
+    "docker:dokploy": "docker compose -f docker-compose.prod.yml -f docker-compose.dokploy.yml up -d --build",
+    "docker:dokploy:down": "docker compose -f docker-compose.prod.yml -f docker-compose.dokploy.yml down",
+    "docker:logs": "docker compose -f docker-compose.prod.yml logs -f",
+    "docker:logs:api": "docker compose -f docker-compose.prod.yml logs -f api",
+    "docker:logs:app": "docker compose -f docker-compose.prod.yml logs -f app",
+    "db:migrate": "cd api && npx prisma migrate deploy",
+    "db:seed": "cd api && npx prisma db seed",
+    "db:studio": "cd api && npx prisma studio"
+  },
+  "keywords": [
+    "water-meter",
+    "iot",
+    "nestjs",
+    "nuxt",
+    "timescaledb",
+    "multi-tenant"
+  ],
+  "author": "Read Water Team",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
+
