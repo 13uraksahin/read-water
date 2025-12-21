@@ -11,6 +11,13 @@
     "nuxt": {
       "type": "http",
       "url": "https://nuxt.com/mcp"
+    },
+    "shadcnVue": {
+      "command": "npx",
+      "args": [
+        "shadcn-vue@latest",
+        "mcp"
+      ]
     }
   }
 }

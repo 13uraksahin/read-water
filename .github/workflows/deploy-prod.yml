@@ -1,0 +1,142 @@
+# =============================================================================
+# Read Water - Production Deploy Workflow
+# =============================================================================
+# Builds and pushes Docker images to GHCR, then triggers Dokploy deployment.
+#
+# Required secrets:
+#   - DOKPLOY_DEPLOY_HOOK_URL: The webhook URL from Dokploy
+#
+# Required variables (optional - uses defaults if not set):
+#   - NUXT_PUBLIC_API_BASE: API URL for frontend build
+#   - NUXT_PUBLIC_SOCKET_URL: WebSocket URL for frontend build
+# =============================================================================
+
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api/**'
+      - 'app/**'
+      - 'docker/**'
+      - 'docker-compose*.yml'
+      - '.github/workflows/deploy-prod.yml'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  API_IMAGE_NAME: ${{ github.repository }}-api
+  APP_IMAGE_NAME: ${{ github.repository }}-app
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  build-and-push:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      api_image: ${{ steps.meta-api.outputs.tags }}
+      app_image: ${{ steps.meta-app.outputs.tags }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # -------------------------------------------------------------------------
+      # API Image
+      # -------------------------------------------------------------------------
+      - name: Extract API metadata
+        id: meta-api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.API_IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./api
+          file: ./api/Dockerfile
+          push: true
+          tags: ${{ steps.meta-api.outputs.tags }}
+          labels: ${{ steps.meta-api.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # -------------------------------------------------------------------------
+      # App Image
+      # -------------------------------------------------------------------------
+      - name: Extract App metadata
+        id: meta-app
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.APP_IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: Build and push App image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          file: ./app/Dockerfile
+          push: true
+          tags: ${{ steps.meta-app.outputs.tags }}
+          labels: ${{ steps.meta-app.outputs.labels }}
+          build-args: |
+            NUXT_PUBLIC_API_BASE=${{ vars.NUXT_PUBLIC_API_BASE || 'https://api.rwa.portall.tr' }}
+            NUXT_PUBLIC_SOCKET_URL=${{ vars.NUXT_PUBLIC_SOCKET_URL || 'https://api.rwa.portall.tr' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to Dokploy
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Dokploy Deploy Hook
+        run: |
+          echo "Triggering Dokploy deployment..."
+          response=$(curl -s -w "\n%{http_code}" -X POST "${{ secrets.DOKPLOY_DEPLOY_HOOK_URL }}")
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          
+          echo "Response: $body"
+          echo "HTTP Status: $http_code"
+          
+          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+            echo "✅ Deployment triggered successfully"
+          else
+            echo "❌ Failed to trigger deployment"
+            exit 1
+          fi
+
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 Deployment Triggered" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**API Image:** \`${{ needs.build-and-push.outputs.api_image }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**App Image:** \`${{ needs.build-and-push.outputs.app_image }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Dokploy will now pull the new images and restart the services." >> $GITHUB_STEP_SUMMARY
+

@@ -36,7 +36,7 @@
   "author": "Read Water Team",
   "license": "UNLICENSED",
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "shadcn-vue": "^2.4.3"
   }
 }
-

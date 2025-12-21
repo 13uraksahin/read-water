@@ -3,6 +3,10 @@
 # =============================================================================
 # This configuration is optimized for Dokploy deployment.
 # Environment variables should be set in Dokploy's environment configuration.
+#
+# Required image variables (set in Dokploy or .env):
+#   API_IMAGE - e.g. ghcr.io/<owner>/readwater-api:latest
+#   APP_IMAGE - e.g. ghcr.io/<owner>/readwater-app:latest
 # =============================================================================
 
 services:
@@ -56,9 +60,7 @@ services:
   # API - NestJS Backend
   # ===========================================================================
   api:
-    build:
-      context: ./api
-      dockerfile: Dockerfile
+    image: ${API_IMAGE:-ghcr.io/readwater/api:latest}
     container_name: readwater-api
     restart: unless-stopped
     depends_on:
@@ -103,12 +105,7 @@ services:
   # App - Nuxt Frontend
   # ===========================================================================
   app:
-    build:
-      context: ./app
-      dockerfile: Dockerfile
-      args:
-        NUXT_PUBLIC_API_BASE: ${NUXT_PUBLIC_API_BASE}
-        NUXT_PUBLIC_SOCKET_URL: ${NUXT_PUBLIC_SOCKET_URL}
+    image: ${APP_IMAGE:-ghcr.io/readwater/app:latest}
     container_name: readwater-app
     restart: unless-stopped
     depends_on:
@@ -133,9 +130,7 @@ services:
   # Migrations - Run Prisma migrations on startup (one-time container)
   # ===========================================================================
   migrations:
-    build:
-      context: ./api
-      dockerfile: Dockerfile
+    image: ${API_IMAGE:-ghcr.io/readwater/api:latest}
     container_name: readwater-migrations
     depends_on:
       timescaledb:

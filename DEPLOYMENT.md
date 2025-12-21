@@ -1,12 +1,54 @@
 # Read Water - Dokploy Deployment Guide
 
-This guide covers deploying Read Water on Dokploy.
+This guide covers deploying Read Water on Dokploy with GitHub Actions CI/CD.
 
 ## Prerequisites
 
 - Dokploy instance running
 - Domain configured (e.g., `your-domain.com`)
 - SSL certificates (usually handled by Dokploy/Traefik)
+- GitHub repository with Actions enabled
+
+## CI/CD Pipeline
+
+This project uses GitHub Actions to build Docker images and deploy to Dokploy automatically.
+
+### How It Works
+
+```
+Push to main → GitHub Actions → Build & Push to GHCR → Trigger Dokploy → Pull & Deploy
+```
+
+1. **CI** (`.github/workflows/ci.yml`): On PRs, verifies Docker builds succeed
+2. **CD** (`.github/workflows/deploy-prod.yml`): On push to `main`, builds images, pushes to GHCR, and triggers Dokploy
+
+### GitHub Setup
+
+#### 1. Add Repository Secret
+
+Go to **Settings → Secrets and variables → Actions → Secrets** and add:
+
+| Secret | Description |
+|--------|-------------|
+| `DOKPLOY_DEPLOY_HOOK_URL` | The Deploy Hook URL from Dokploy (see step 2.1 below) |
+
+#### 2. Add Repository Variables (Optional)
+
+Go to **Settings → Secrets and variables → Actions → Variables** and add:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NUXT_PUBLIC_API_BASE` | `https://api.rwa.portall.tr` | API URL baked into frontend build |
+| `NUXT_PUBLIC_SOCKET_URL` | `https://api.rwa.portall.tr` | WebSocket URL baked into frontend build |
+
+### Docker Images
+
+Images are published to GitHub Container Registry (GHCR):
+
+- **API**: `ghcr.io/<owner>/readwater-api:latest`
+- **App**: `ghcr.io/<owner>/readwater-app:latest`
+
+Each push also creates a SHA-tagged version (e.g., `sha-abc1234`) for rollback purposes.
 
 ## Quick Start
 
@@ -15,48 +57,82 @@ This guide covers deploying Read Water on Dokploy.
 1. Go to your Dokploy dashboard
 2. Click "New Project"
 3. Select "Docker Compose" as the deployment type
-4. Connect your Git repository or upload the code
+4. Connect your Git repository
+5. **Important**: Copy the **Deploy Hook URL** from the project settings (needed for GitHub Actions)
 
-### 2. Configure Environment Variables
+### 2. Configure Docker Registry (for GHCR)
+
+If your GitHub repository/packages are **private**, add GHCR credentials in Dokploy:
+
+1. Go to **Settings → Docker Registry** in Dokploy
+2. Add a new registry:
+   - **Registry URL**: `ghcr.io`
+   - **Username**: Your GitHub username or organization
+   - **Password**: A GitHub Personal Access Token with `read:packages` scope
+
+> **Note**: If your packages are public, skip this step.
+
+### 3. Configure Environment Variables
 
 In Dokploy's environment configuration, set the following variables:
 
 ```env
+# =============================================================================
+# Docker Images (GHCR)
+# =============================================================================
+# Replace <owner> with your GitHub username or organization (lowercase)
+API_IMAGE=ghcr.io/<owner>/readwater-api:latest
+APP_IMAGE=ghcr.io/<owner>/readwater-app:latest
+
+# =============================================================================
 # PostgreSQL
+# =============================================================================
 POSTGRES_USER=readwater
 POSTGRES_PASSWORD=<generate-strong-password>
 POSTGRES_DB=readwater
 
+# =============================================================================
 # Redis (optional, leave empty for no password)
+# =============================================================================
 REDIS_PASSWORD=<generate-strong-password>
 
+# =============================================================================
 # JWT Secrets (CRITICAL - generate unique values!)
 # Generate with: openssl rand -base64 64
+# =============================================================================
 JWT_SECRET=<generate-64-char-secret>
 JWT_EXPIRES_IN=7d
 JWT_REFRESH_SECRET=<generate-64-char-secret>
 JWT_REFRESH_EXPIRES_IN=30d
 
+# =============================================================================
 # Ports
+# =============================================================================
 API_PORT=4000
 APP_PORT=3000
 
+# =============================================================================
 # CORS (your frontend domain)
+# =============================================================================
 CORS_ORIGINS=https://app.your-domain.com
 
+# =============================================================================
 # Frontend environment
+# =============================================================================
 NUXT_PUBLIC_API_BASE=https://api.your-domain.com
 NUXT_PUBLIC_SOCKET_URL=https://api.your-domain.com
 
+# =============================================================================
 # Queue (optional)
+# =============================================================================
 QUEUE_READINGS_CONCURRENCY=10
 ```
 
-### 3. Select the Docker Compose File
+### 4. Select the Docker Compose File
 
 Use `docker-compose.prod.yml` as the compose file.
 
-### 4. Configure Domains
+### 5. Configure Domains
 
 In Dokploy, configure the following domains:
 
@@ -65,14 +141,17 @@ In Dokploy, configure the following domains:
 | `app` | `app.your-domain.com` | 3000 |
 | `api` | `api.your-domain.com` | 4000 |
 
-### 5. Deploy
+### 6. Deploy
 
 Click "Deploy" in Dokploy. The deployment will:
 
-1. Start TimescaleDB and Redis
-2. Wait for health checks
-3. Run database migrations
-4. Start the API and App services
+1. Pull images from GHCR
+2. Start TimescaleDB and Redis
+3. Wait for health checks
+4. Run database migrations
+5. Start the API and App services
+
+> **After initial setup**: Deployments happen automatically when you push to `main`. GitHub Actions builds the images, pushes to GHCR, and triggers the Dokploy deploy hook.
 
 ## Service Architecture
 
@@ -133,11 +212,19 @@ This creates:
 - Meter/Device brands
 - Sample profiles
 
-## Updating
+## Updating (Automatic via CI/CD)
 
-1. Push your code changes to the repository
-2. In Dokploy, click "Redeploy"
-3. Migrations run automatically
+1. Push your code changes to the `main` branch
+2. GitHub Actions automatically:
+   - Builds new Docker images
+   - Pushes them to GHCR
+   - Triggers Dokploy deploy hook
+3. Dokploy pulls new images and restarts services
+4. Migrations run automatically
+
+### Manual Redeploy
+
+If needed, you can also trigger a manual redeploy in Dokploy by clicking "Redeploy".
 
 ## Troubleshooting
 
