@@ -1,320 +1,187 @@
-## 0. AI Context & Navigation (Nuxt 4 Standards)
-*   **Documentation Map:** Before searching for files randomly, read `app/public/llms.txt`. This file contains the exact map of Pages, Stores, and Components.
-*   **MCP Usage:** Use the connected 'read-water-frontend-context' MCP server to read file contents securely.
-*   **Nuxt 4 Rules:**
-    *   Use `<script setup lang="ts">` syntax strictly.
-    *   Use auto-imports (do not manually import Vue functions like `ref`, `computed`).
-    *   Use `useRuntimeConfig()` for environment variables.
+# Project Context & Rules for "Read Water"
 
 ## 1. Project Context & Role
 *   **Role:** Act as a Senior Full Stack Software Architect and Lead Developer.
 *   **Project Name:** Read Water
-*   **Goal:** Build a high-performance, multi-tenant, remote water meter reading platform capable of handling 1M+ concurrent requests and 10K+ user actively checking live data that transport over Socket.
-*   **Primary Language:** English (Codebase, Variable Names, Comments, Commits).
-*   **UI/Support Languages:** The application must support English, Turkish, and French (i18n).
+*   **Goal:** Build a high-performance, multi-tenant **Utility Management Platform** managing Customers, Subscriptions, Meters (Assets), and Devices (IoT). The platform will be capable of handling 1M+ concurrent requests and 10K+ user actively checking live data that transport over Socket
+*   **Architecture Style:** Modular Monolith (NestJS) + SPA (Nuxt 4).
+*   **Primary Language:** English (Codebase).
+*   **UI Languages:** English, Turkish, French (i18n).
 
 ## 2. Tech Stack Requirements
+*   **Infra:** Docker, Postgres (TimescaleDB + ltree), Redis (BullMQ + Streams).
+*   **Backend:** NestJS, Prisma 6, Kysely, Socket.IO (Redis Streams Adapter), Class-Validator & Class-Transformer.
+*   **Frontend:** Nuxt 4, Pinia, Shadcn/UI (Vue), ApexCharts, Leaflet, Socket.IO.
 
-### Infrastructure & DevOps
-*   **Containerization:** Docker, Docker Compose, Dockerfile (Production-ready multi-stage builds).
-*   **Database:**
-    *   **Single PostgreSQL Instance:** Use the official `timescale/timescaledb` Docker image (latest stable).
-    *   **Extensions:**
-        *   `timescaledb`: Enabled for time-series data (Readings).
-        *   `ltree`: Enabled for hierarchical multi-tenancy (Tenants).
-*   **Caching & Queues:** Redis (Latest).
+## 3. Core Architecture: The "Subscription" Model
+**CRITICAL LOGIC CHANGE:** The system does NOT link Meters directly to Customers anymore.
+*   **Hierarchy:** `Tenant` -> `Customer` -> `Subscription` -> `Meter (Asset)` -> `Device (IoT)`.
+*   **Logic:** A Customer creates a Subscription (e.g., for a specific house). A Meter is linked to that Subscription. If the customer moves, the Subscription ends, and the Meter becomes free for a new Subscription.
+*   **Address Management:** There will be no more customer, meter or device addresses. Instead, there will be a single address for each Subscription.
+---
 
-### Backend (`/api`)
-*   **Framework:** NestJS (Latest Stable).
-*   **ORM:** Prisma 6 (Latest) for standard CRUD, schema definition, and migrations.
-*   **Query Builder:** Kysely (Latest) for complex analytics and aggregations on TimescaleDB hypertables.
-*   **Queue Management:** BullMQ (Robust queue handling for high-volume ingestion).
-*   **Real-time:** Socket.IO with **Redis Streams Adapter** (`@socket.io/redis-streams-adapter`).
-*   **Validation:**
-    *   `class-validator` & `class-transformer` for DTOs.
-    *   Global Validation Pipe with whitelist enabled.
+## 4. Database Schema Strategy (Strict Specifications)
 
-### Frontend (`/app`)
-*   **Framework:** Nuxt (Latest Stable).
-*   **State Management:** Pinia (Latest Stable).
-*   **UI Library:** Shadcn/UI + TailwindCSS (Latest).
-*   **Charts:** ApexCharts.
-*   **Real-time:** Socket.IO Client.
-*   **Maps:** Leaflet or Google Maps integration (rendering meters on Lat/Lng).
+### 4.1. Definitions & Enums
+*   **SubscriptionType:** `INDIVIDUAL`, `ORGANIZATIONAL`.
+*   **SubscriptionGroup:** `NORMAL_CONSUMPTION`, `HIGH_CONSUMPTION`.
+*   **MeterType:** Single Jet, Multi Jet, Woltman (Paralel/Vertical), Volumetric, Ultrasonic, Electromagnetic, Compound, Irrigation.
+*   **DialType:** Semi-Dry, Dry, Super-Dry, Wet.
+*   **CommModule:** Integrated, Retrofit, None.
+*   **Brands:**
+    *   *MeterBrands:* Baylan, Manas, Itron, Klepsan, Cem, Zenner, Türkoğlu, Bereket, Teksan.
+    *   *DeviceBrands:* Ima, Itron, Manas, Inodya, Zenner, Baylan, Cem, Klepsan.
+*   **Statuses:**
+    *   *Meter/Device:* Active, Passive, Warehouse, Maintenance, Planned, Deployed, Used.
+*   **CommTechnologies:** Sigfox, LoRaWAN, NB-IoT, wM-Bus, Mioty, Wi-Fi, Bluetooth, NFC, OMS.
 
-## 3. Architecture & Scalability Principles
-
-### 3.1. Hierarchical Multi-Tenancy
-*   **Implementation:** Use PostgreSQL `ltree` extension.
-*   **Logic:** Tenant structure is a tree (e.g., `Root.Region.City`).
-*   **Isolation:** Data access must be restricted using RLS (Row Level Security) or strict Middleware logic checking the user's `tenant_path` against the requested resource.
-
-### 3.2. High Concurrency Ingestion (The "1 Million Request" Strategy)
-*   **Rule:** NEVER write directly to the database during the HTTP/MQTT request for readings.
-*   **Flow:**
-    1.  **Ingest:** IoT Device sends data -> API Gateway.
-    2.  **Buffer:** API validates DTO -> Pushes raw payload to **BullMQ** (Redis).
-    3.  **Process:** Worker Service (Consumer) picks up the job.
-    4.  **Decode:** Worker executes the "Decoder Function" (JS Expression stored in Meter Profile) for that specific meter model.
-    5.  **Persist:** Worker performs **Bulk Insert** into TimescaleDB.
-    6.  **Notify:** Worker publishes event -> Socket.IO (Redis Streams) -> Connected Frontend Clients.
-
-## 4. Coding & Implementation Guidelines
-*   **Dynamic Fields (Crucial):**
-    *   **Meters:** Connectivity fields (e.g., LoRaWAN keys) are dynamic based on the selected technology. Store in `JSONB`.
-    *   **Customers:** Fields change based on "Individual" vs "Organizational" type.
-*   **Validation:** Use `class-validator` decorators (`@IsString()`, `@Matches()`, etc.) strictly. Use the Regex patterns provided in Section 6.8.
-*   **I18n:** Do not hardcode text. Use translation keys.
+### 4.2. Core Models (Prisma)
+1.  **Tenants:** `id`, `name`, `path` (ltree), `type` (Root/Agency).
+2.  **Users:** `id`, `tenantId`, `role` (RBAC), `permissions`.
+3.  **Customers:**
+    *   `id`, `tenantId`.
+    *   `type` (Ind/Org).
+    *   `details` (JSONB - Name/Surname or OrgName/TaxID).
+    *   **Relations:** Has many `Subscriptions`.
+4.  **Subscriptions (The Core Link):**
+    *   `id`, `tenantId`, `customerId`.
+    *   `type` (Enum), `group` (Enum).
+    *   `address` (JSONB - City, District, Street, UAVT, Lat/Lng).
+    *   **Relations:** Has 0 or 1 active `Meter`.
+5.  **Meters (Assets):**
+    *   `id`, `serial_number`, `profileId`, `tenantId`, `status`.
+    *   `subscriptionId` (Nullable - Active link).
+    *   `active_device_id` (Nullable - Active IoT link).
+6.  **Devices (IoT Inventory):**
+    *   `id`, `serial_number`, `profileId`, `tenantId`, `status`.
+    *   `dynamic_fields` (JSONB - DevEUI, Keys).
+    *   **Relations:** Linked to 0 or 1 `Meter`.
+7.  **Profiles:**
+    *   `MeterProfile`: Mechanical specs (Qn, Dimensions).
+    *   `DeviceProfile`: IoT specs + Decoder Functions.
+    *   `CompatibleProfiles`: Pivot table (Many-to-Many).
 
 ---
 
-## 5. FUNCTIONAL SPECIFICATIONS & UI STRUCTURE (The "Bible")
-
-Use the following tree structure to understand the UI flow, data entities, and field requirements.
+## 5. Functional Specifications (Modules/Views)
 
 ### 1. Dashboard
-*   **1.1. Map**
-    *   **1.1.1. Meters:** Shown on map with correct Lat/Lng.
-        *   **Symbols/Colors:**
-            *   **Red:** Alarm (Tamper, Low Battery, Tilt, Reverse Flow).
-            *   **Orange:** High water usage.
-            *   **Green:** Normal usage.
-            *   **Grey:** No signal/Offline.
-*   **1.2. Alerts:** Count & Latest alarms list.
-*   **1.3. Total meter count**
-*   **1.4. Total water usage**
-*   **1.5. Meters Status:** Widget showing count of Out of Service / Maintenance.
+*   **Map:** Show **Subscriptions** (not just meters) based on address Lat/Lng. Colors: Red (Alarm), Orange (High Usage), Green (Normal), Grey (Offline).
+*   **Stats:** Total Subscriptions, Total Meters, Total Devices, Water Usage.
 
 ### 2. Live Readings
-*   **2.1. Dashboard Table:**
-    *   Pagination: 30 per page.
-    *   Columns: Meter ID, Customer, Location (Lat/Lng), Meter Brand, Type.
-    *   *Must update in real-time via Socket.*
+*   **Table:** Meter ID | Date | Customer | Location | Brand | Value.
+*   **Realtime:** Updates via Socket.IO.
 
-### 3. Customers
-*   **3.1. Dashboard Table:** Name/Surname, TC/Tax ID, Address, Tenant.
-*   **3.2. Detail View:**
-    *   Info Card.
-    *   Linked Meters List.
-    *   Consumption History Chart (Total & By Meter).
-*   **3.3. Create/Update Form:**
-    *   **Tenant:** Auto-selected if Tenant Admin, selectable if Platform Admin.
-    *   **Consumption Type:** Normal vs High.
-    *   **Customer Type:** Individual vs Organizational.
-    *   **Conditional Fields (Based on Customer Type):**
-        *   **If Individual:** Name, Surname, TC ID No, Phone, Email, Main Address (City, District, etc., Lat/Lng).
-        *   **If Organizational:** Organization Name, Tax ID, Tax Office, Customer Contact Person (Name/Surname/Phone/Email), Main Address.
+### 3. Subscriptions (Main Operation Hub)
+*   **List:** ID | Customer Name | TC/Tax | Address | Linked Meter.
+*   **Detail:**
+    *   Info Card (Type, Group).
+    *   Related Customer Card.
+    *   Related Meter & Device Card.
+    *   Consumption Chart (Total / By Meter).
+*   **Create/Update Wizard:**
+    1.  **Tenant:** Auto-select or pick.
+    2.  **Customer:** Select Existing OR Create New (Individual/Org fields).
+    3.  **Address:** Enter full address details (City...UAVT).
+    4.  **Link Meter:** Select from "Warehouse" status meters.
+    5.  **Link Device:** (Optional) Select from "Warehouse" devices.
 
-### 4. Meters
-*   **4.1. Dashboard:** Table filterable by Tenant, Status, Brand.
-*   **4.2. Detail View:**
-    *   Technical Info, Status & Connectivity (Signal/Battery), Valve Status, Reading History.
-*   **4.3. Create/Update Form:**
-    *   **Fields:** Customer, Meter Profile (Filtered by Tenant), Serial/ID, Initial Index, Installation Date (DD.MM.YYYY HH:mm:ss), Meter Status, Address Details, Lat/Lng, Tenant.
-    *   **WAN Connectivity (Primary & Secondary):**
-        *   **Dynamic Logic:** User selects "Communication Technology". System renders fields defined in `Profiles -> Communication Technologies`.
-        *   **Storage:** Stored in `JSONB`.
-    *   **Other Technologies:** Array of selected technologies with dynamic fields.
+### 4. Customers
+*   **Logic:** A registry of people/companies.
+*   **Detail:** Shows list of **Related Subscriptions**.
 
-### 5. Profiles (System Configuration)
-*   **5.1. Meter Profiles:**
-    *   **Fields:** Brand, Model Code (Unique), Meter Type, Dial Type, Connection Type, Mounting Type, Temperature Type, Diameter, Dimensions (L/W/H), Flow Rates (Q1-Q4), R Value, Pressure Loss, IP Rating.
-    *   **Communication Config:**
-        *   Communication Module Type.
-        *   Communication Technologies (Array):
-            *   **Decoder Function:** The JS Expression used to parse payloads is **CREATED AND EDITED HERE**.
-            *   **Dynamic Fields Definition:** Defines which fields (e.g., DevEUI) are required when this profile is used.
-    *   **Battery Life.**
+### 5. Meters (Assets) & 6. Devices (Inventory)
+*   **Meters:** Linked to Subscription.
+*   **Devices:** Linked to Meter.
+*   **Status Management:** Lifecycle (Warehouse -> Deployed -> Maintenance).
+*   **Device Config:**
+    *   **None:** Mechanical only.
+    *   **Select from Inventory:** Pick existing.
+    *   **Create New:** Inline creation with Dynamic Fields (DevEUI etc.).
 
-### 6. Definitions (Enums & Lookups)
-*   **6.1. Meter Types:** Single Jet, Multi Jet, Woltman (Paralel/Vertical), Volumetric, Ultrasonic, Electromagnetic, Compound, Irrigation.
-*   **6.2. Dial Types:** Semi-Dry, Dry, Super-Dry, Wet.
-*   **6.3. Temp Types:** T30, T90.
-*   **6.4. Mounting:** Vertical, Horizontal, Both.
-*   **6.5. Connection:** Thread, Flange.
-*   **6.6. Comm Modules:** Integrated, Retrofit, None.
-*   **6.7. Brands:** Baylan, Manas, Klepsan, Cem, Zenner, Türkoğlu, Bereket, Teksan.
-*   **6.8. Communication Technologies (Validations & Fields):**
-    *   **Sigfox:**
-        *   `ID` (Hex, Length 8, Regex: `^[a-fA-F0-9]{8}$`)
-        *   `PAC` (Hex, Length 16, Regex: `^[a-fA-F0-9]{16}$`)
-    *   **LoRaWAN:**
-        *   `DevEUI` (Hex, Length 16, Regex: `^[a-fA-F0-9]{16}$`)
-        *   `JoinEUI` (Hex, Length 16, Regex: `^[a-fA-F0-9]{16}$`)
-        *   `AppKey` (Hex, Length 32, Regex: `^[a-fA-F0-9]{32}$`)
-    *   **Others:** NB-IoT, wM-Bus, Mioty, Wi-Fi, Bluetooth, NFC, OMS.
-*   **6.9. Integration:** HTTP, MQTT, API.
-*   **6.10. Consumption Types:** Normal, High.
-*   **6.11. Customer Types:** Individual, Organizational.
-*   **6.12. Meter Statuses:** Active, Passive, Warehouse, Maintenance, Planned, Deployed.
-*   **6.13. IP Ratings:** IP54, IP65, IP67, IP68.
-*   **6.14. System Roles:**
-    *   Platform Admin, Tenant Admin, Operator, Viewer, Field Engineer, Customer.
-*   **6.15. Permissions:**
-    *   `tenant.*`, `user.*`, `meter.*` (CRUD), `reading.read/export`, `valve.control`.
-
-### 7. Settings
-*   Domain, HTTP Callback URL, MQTT URL.
-*   **White Labeling:** Logo, Name, Title, Description.
-
-### 8. Shared Entities
-*   **Addresses:** City, District, Neighborhood, Street, Building No, Floor, Door No, Postal Code, Extra Details.
-
-### 9. Decoder Functions
-*   **9.1. Dashboard:**
-    *   **Visual:** Displays Cards of existing decoder functions (Name, Associated Meter Profile).
-    *   **Interaction:** **Read-only**. Decoders *cannot* be created or edited here.
-    *   **Action:** Clicking a card navigates to the corresponding **Meter Profile (Section 5.1)** where the decoder can be edited.
-
-### 10. IAM (Identity & Access Management)
-*   **10.1. Tenants:**
-    *   Treetable view.
-    *   **Tree Structure:** Managed via `ltree`.
-    *   **Details:** Company Info, Subscription, Stats, Users, Allowed Profiles.
-*   **10.2. Users:**
-    *   **Details:** Info, Activity Log, Assigned Tenants (Role per Tenant).
-*   **10.3. Roles Matrix:**
-    *   **Platform Admin:** All permissions.
-    *   **Tenant Admin:** Scoped permissions (cannot delete tenant).
-    *   **Operator:** Read/Write operational data.
-    *   **Viewer:** Read-only.
-    *   **Field Engineer:** Update Meter installation data only.
+### 7. Profiles (Configuration)
+*   **Meter Profiles:** Brand, Model, Type, Qn, etc.
+*   **Device Profiles:** Brand, Model, Comm Tech (Sigfox/LoRaWAN).
+    *   **Decoder Function:** JS Expression editor.
+    *   **Field Definitions:** Regex validation for keys (e.g., `^[a-fA-F0-9]{16}$`).
+    *   **Compatibility:** Select which Meter Profiles this device works with.
 
 ---
 
-## Instructions for Initialization
+## 6. Relations & Logic (Business Rules)
 
-1.  **Phase 1: Structure & Infra:**
-    *   Create `api` and `app` folders.
-    *   Create `docker-compose.yml` with `timescale/timescaledb:latest-pg16` (ensure `ltree` is enabled via init script) and `redis:latest`.
-2.  **Phase 2: Database:**
-    *   Initialize Prisma schema. Use `ltree` for Tenants. Use `JSONB` for Customer details (dynamic) and Meter Connectivity configs. Define Readings as a Timescale Hypertable.
-3.  **Phase 3: Backend:**
-    *   Scaffold NestJS. Setup `BullMQ` module. Setup `Socket.IO` with **Redis Streams Adapter**. Configure Global Validation Pipe with `class-validator`.
-4.  **Phase 4: Frontend:**
-    *   Scaffold Nuxt with Shadcn/UI. Setup Pinia and Socket.IO client.
+1.  **Tenants:** Hierarchical (Root -> Children). Child cannot see Parent data.
+2.  **Users:** Assigned to Tenants. RBAC enforces visibility.
+3.  **Customers:** Must belong to 1 Tenant. Can have N Subscriptions.
+4.  **Subscriptions:**
+    *   Must belong to 1 Customer.
+    *   Can have **only 1 active Meter** at a time.
+    *   Can have history of past Meters.
+5.  **Meters:**
+    *   Belong to 1 Tenant.
+    *   Linked to 0 or 1 Subscription.
+    *   Linked to 0 or 1 Device.
+6.  **Devices:**
+    *   Belong to 1 Tenant.
+    *   Linked to 0 or 1 Meter.
+    *   Must match Compatibility Profile with the Meter.
 
-Start by setting up the **Project Structure** and **Docker Compose**.
+---
+
+## 7. Seed Data Specification (Strict Implementation)
+
+**1. Tenants:**
+*   Root ("Una IoT")
+*   Child 1 ("ASKİ"), Child 2 ("HATSU").
+
+**2. Users:**
+*   `iot@una.net.tr` (Super Admin).
+*   `aski.yetkili@...` (Tenant Admin).
+*   `hatsu.yetkili@...` (Tenant Admin).
+
+**3. Profiles & Compatibility:**
+*   **Meter Profiles (10):**
+    *   2x Manas, 2x Itron (Compat: Manas/Itron/Ima/Inodya).
+    *   2x Baylan (Compat: Baylan/Ima).
+    *   2x Zenner (Compat: Ima).
+    *   1x Cem, 1x Klepsan (Compat: Self + Ima).
+*   **Device Profiles (7):**
+    *   Manas, Itron, Baylan, Cem, Klepsan, Ima (Universal), Inodya.
+
+**4. Assets & Inventory (Distribution):**
+*   **ASKİ:**
+    *   **100 Customers** -> **128 Subscriptions**.
+    *   **100 Meters** (Mixed Brands).
+    *   **100 Devices** (Mixed Brands).
+*   **HATSU:**
+    *   **64 Customers** -> **50 Subscriptions**.
+    *   **50 Meters** (Mixed Brands).
+    *   **50 Devices** (Mixed Brands).
+
+**5. Historical Data (High Volume):**
+*   **Duration:** 45 Days.
+*   **Frequency:** 24 readings/day (Hourly).
+*   **Target:** All linked devices.
+*   **Method:** Use SQL `generate_series` for performance.
+
+---
+
+## Instructions for Cursor (How to Refactor)
+
+1.  **Phase 1 (DB):** Update `schema.prisma` to include the `Subscription` model and update relations. Update `seed.ts` with the new logic. Run Migration.
+2.  **Phase 2 (Backend):** Create `SubscriptionsModule`. Refactor `Customers`, `Meters`, `Devices` modules to respect the new hierarchy.
+3.  **Phase 3 (Frontend):** Create `pages/subscriptions`. Update Customer/Meter details to show subscription links. Update "Create" wizards.
 
 **Hints of Fields:**
 Below is the raw structure so that this structure can be understood much more deeply:
-All-in-One Remote Water Meter Reading
 
 Structure
-1. Dashboard
-    1. Map
-        1. Meters
-            1. Shown on the map
-                1. On the correct lat, log and with a symbol and color
-                    1. Red: Alarm (tamper detection - Low Battery - Tilt - Reverse Flow)
-                    2. Orange: High water usage
-                    3. Green: No problem, Normal usage
-                    4. Grey: No signal/Offline
-    2. Alerts
-        1. Count
-        2. Latest alarms
-    3. Total meter count
-    4. Total water usage
-    5. Meters that are out of service / on maintenance /etc.
-        1. Shows meters or remote devices that is not in use
-2. Live Readings
-    1. Dashboard
-        1. Table
-            1. 30 per page
-                1. Meter ID
-                2. Customer
-                3. Location (Lat,Lng)
-                4. | Meter Brand | Type |
-3. Customers
-    1. Dashboard
-        1. Table
-            1. | Name + Surname | TC/Tax ID | Address | Tenant |
-    2. Selected customer detail
-        1. Customer info card
-        2. Linked meters list
-        3. Consumption history chart
-            1. Total
-            2. By meter
-    3. Create/Update Page/Dialog/Form
-        1. Tenant (from 10.1: IAM -> Tenants) (Hidden/Auto-selected if user is Tenant Admin)
-        2. Consumption Type (From 6.10: Definitions -> Consumption Types)
-        3. Customer Type (From 6.11: Definitions -> Customer Types)
-        4. Fields
-            1. If 3.3.3 is 6.11.1
-                1. Name/s
-                2. Surname
-                3. TC ID No
-                4. Main Address
-                    1. Main address’ details (from 8.1 -> Shared Entities -> Addresses)
-                    2. Main address’ Latitude
-                    3. Main address’ Longitude
-                    4. Main address’ TC Address Code
-                5. Phone Number
-                6. Email
-                7. Other details if needed
-            2. If 3.3.3 is 6.11.2
-                1. Organization name (full name)
-                2. Tax ID
-                3. Tax Office
-                4. Main Address
-                    1. Main address’ details (from 8.1 -> Shared Entities -> Addresses)
-                    2. Main address’ Latitude
-                    3. Main address’ Longitude
-                    4. Main address’ TC Address Code
-                5. Customer contact name
-                6. Customer contact surname
-                7. Customer contact phone number
-                8. Customer contact email
-        5. Other details if needed
-4. Meters (Assets)
-    1. Dashboard
-        1. All meters table (Filterable by Tenant, Status, Brand)
-    2. Selected meter detail
-        1. Technical Info (Brand, Model, Serial)
-        2. Status & Connectivity Info (Signal Strength, Battery)
-        3. Valve Status (Open/Close - If applicable)
-        4. Reading History Table
-    3. Create/Update Page/Dialog/Form
-        1. Customer (Filtered by selected Tenant)
-        2. Meter Profile (Filtered by Tenant -> Allowed Profiles)
-        3. Serial / ID
-        4. Initial Index
-        5. Installation Date (DD.MM.YYYY HH:mm:ss -> 08.12.2025 07:18:55)(24 hours and no am/pm)
-        6. Meter Status (from 6.12: Definitions -> Meter Statuses)
-        7. Address details (from 8.1: Shared Entities -> Addresses)
-        8. Latitude
-        9. Longitude
-        10. TC Address Code
-        11. Tenant (from 10.1: IAM -> Tenants)
-        12. Communication Module (Can overwrite the profile)
-        13. Device Configurations
-            1. None
-            2. Select From Inventory
-            3. Create New
-5. Profiles
-    1. Meter Profiles
-        1. Brand (from 6.7: Definitions -> Brands)
-        2. Model Code (Brand + Model Code must be unique)
-        3. Meter Type (from 6.1: Definitions -> Meter Types)
-        4. Dial Type (from 6.2: Definitions -> Dial Types)
-        5. Connection Type (from 6.5: Definitions -> Connection Types)
-        6. Mounting Type (from 6.4: Definitions -> Mounting Types)
-        7. Temperature Type (from 6.3: Definitions -> Temperature Types)
-        8. Diameter
-        9. Length
-        10. Width
-        11. Height
-        12. Q1 (Qmin)
-        13. Q2 (Qt)
-        14. Q3 (Qn)
-        15. Q4 (Qmax)
-        16. R Value (Can be automatically calculated from Q3/Q1 or can be written manually)
-        17. Pressure Loss
-        18. IP Rating (from 6.13: Definitions -> IP Ratings)
-        19. Communication Module (from 6.6: Definitions -> Communication Modules)
-        20. Compatible Device Profiles (From 12: Device Profiles)
-6. Definitions
-    1. Meter Types
+1. Definitions
+    1. Subscription Types
+        1. Individual
+        2. Organizational
+    2. Meter Types
         1. Single Jet
         2. Multi Jet
         3. Woltman Paralel
@@ -324,35 +191,48 @@ Structure
         7. Electromagnetic
         8. Compound
         9. Irrigation (Tangential/Paddle)
-    2. Dial Types
+    3. Dial Types
         1. Semi-Dry Dial
         2. Dry Dial
         3. Super-Dry Dial
         4. Wet Dial
-    3. Temperature Types
+    4. Temperature Types
         1. T30 (Cold)
         2. T90 (Hot)
-    4. Mounting Types
+    5. Mounting Types
         1. Vertical
         2. Horizontal
         3. Both
-    5. Connection Types
+    6. Connection Types
         1. Thread (Dişli / Rakorlu)
         2. Flange (Flanşlı)
-    6. Communication Modules
+    7. IP Ratings
+        1. IP54
+        2. IP65
+        3. IP67
+        4. IP68
+        5. …
+    8. Meter Statuses
+        1. Active
+        2. Passive
+        3. Warehouse
+        4. Maintenance
+        5. Planned
+        6. Deployed but not started
+        7. Used
+    9. Device Statuses
+        1. Active
+        2. Passive
+        3. Warehouse
+        4. Maintenance
+        5. Planned
+        6. Deployed but not started
+        7. Used
+    10. Communication Modules
         1. Integrated in meter
         2. Retrofit
         3. None
-    7. Brands
-        1. Baylan
-        2. Manas
-        3. Klepsan
-        4. Cem
-        5. Zenner
-        6. Türkoğlu
-        7. Bereket
-        8. Teksan
-    8. Communication Technologies
+    11. Communication Technologies
         1. Sigfox (HTTP or API)
             1. Fields while adding meters
                 1. Key Name: ID, Key Type: Hexadecimal String, Key Length: 8, Validation Regex: ^[a-fA-F0-9]{8}$
@@ -390,216 +270,314 @@ Structure
             1. Fields while adding meters
                 1. …
                 2. …
-    9. Integration Technologies
-        1. HTTP
-        2. MQTT
-        3. API (Cron Job Maybe???)
-    10. Consumption Types
+    12. Meter Brands
+        1. Baylan
+        2. Manas
+        3. Itron
+        4. Klepsan
+        5. Cem
+        6. Zenner
+        7. Türkoğlu
+        8. Bereket
+        9. Teksan
+    13. Device Brands
+        1. Ima
+        2. Itron
+        3. Manas
+        4. Inodya
+        5. Zenner
+        6. Baylan
+        7. Cem
+        8. Klepsan
+    14. Shared Entities (Will not be shown on the navigation bar)
+        1. Addresses
+            1. Name
+            2. Latitude
+            3. Longitude
+            4. City
+            5. District
+            6. Neighborhood
+            7. Street
+            8. Building no
+            9. Floor
+            10. Door no
+            11. Postal code
+            12. Address code (UAVT)
+            13. Address Description
+            14. Extra details in text
+    15. Subscription Groups
         1. Normal Consumption
         2. High Consumption
-    11. Customer Types
-        1. Individual
-        2. Organizational
-    12. Meter Statuses
-        1. Active
-        2. Passive
-        3. Warehouse
-        4. Maintenance
-        5. Planned
-        6. Deployed but not started
-    13. IP Ratings
-        1. IP54
-        2. IP65
-        3. IP67
-        4. IP68
-        5. …
-    14. System Roles (Static definitions)
-        1. Platform Admin (God Mode)
-        2. Tenant Admin
-        3. Operator (Read/Write)
-        4. Viewer (Read Only)
-        5. Field Engineer (Control & Installation App User)
-        6. Customer (Mobile App User)
-    15. System Permissions (Capabilities)
-        1. tenant.create
-        2. tenant.read
-        3. tenant.update
-        4. tenant.delete
-        5. user.create
-        6. user.read
-        7. user.update
-        8. user.delete
-        9. meter.create
-        10. meter.read
-        11. meter.update
-        12. meter.delete
-        13. reading.read
-        14. reading.export
-        15. valve.control
-    16. Device Statuses
-        1. Active
-        2. Passive
-        3. Warehouse
-        4. Maintenance
-        5. Planned
-        6. Deployed but not started
-7. Settings
-    1. Domain
-    2. HTTP Callback URL
-    3. MQTT URL
-    4. White Labeling
-        1. Logo
-        2. Name
-        3. Title
-        4. Description
-8. Shared Entities (Will not be shown on the navigation bar)
-    1. Addresses:
-        1. City
-        2. District
-        3. Neighborhood
-        4. Street
-        5. Building no
-        6. Floor
-        7. Door no
-        8. Postal code
-        9. Extra details in text
-9. Decoder functions
+2. Modules/Views
     1. Dashboard
-        1. Cards of the decoder functions (Can be viewed by clicking but cannot be created or edited from here)
-10. IAM
-    1. Tenants
+        1. Subscriptions
+            1. Show on the map with the correct position (lat, lng) and indicators (symbols and colors)
+                1. Red: Alarm (tamper detection - Low Battery - Tilt - Reverse Flow)
+                2. Orange: High water usage
+                3. Green: No problem, Normal usage
+                4. Grey: No signal/Offline
+        2. Alerts
+            1. Count
+            2. Latest Alarms
+        3. Total Subscription Count
+        4. Total Meter Count
+        5. Total Device Count
+        6. Total Water Usage
+        7. Meters that are out of service / on maintenance /etc.
+            1. Shows meters or remote devices that is not in use
+    2. Live Readings
         1. Dashboard
-            1. Treetable
-                1. Tenant name
-        2. Selected tenant details
-            1. Company Info Card (Name, Tax ID, Address)
-            2. Subscription Status (Active/Passive, Plan Type)
-            3. Summary Stats: (Total Users, Total Meters, Active Alarms)
-            4. Users list (List of users assigned to this tenant)
-            5. Allowed Profiles List (Which meter models they can use)
-        3. Create/Update Page/Dialog/Form
-            1. Parent Tenant (from 10.1: IAM -> Tenants)
-            2. Name
-            3. Contact name/s
-            4. Contact surname
-            5. Contact phone number
-            6. Contact email
-            7. Tax ID
-            8. Tax office
-            9. Tenant address’ latitude
-            10. Tenant address’ longitude
-            11. Tenant address’ address code
-            12. Tenant Address’ details (from 8.1: Shared Entities -> Addresses)
-            13. Users list (from 10.2)
-                1. If a user is selected, select roles from a popup
-            14. Existed users list (read-only)
-            15. Allowed meter profiles (from 5.1: Profiles -> Meter Profiles) (Multi-select) 
-    2. Users
+            1. All Readings Table (Meter ID | Date & Time {DD.MM.YYYY HH:mm:ss} | Customer | Location (Lat, Lng) | Meter Brand | Type) (30 records per page)
+    3. Subscriptions
         1. Dashboard
-            1. Table
-                1. User name + User Surname
-        2. Selected user details
-            1. User Info Card (Name, Email, Phone)
-            2. Activity Log (Last login, Last actions)
-            3. Assigned Tenants Table (Tenant Name | Role)
+            1. All Subscriptions Table (Subscription ID | TC/Tax ID | Consumption | Address)
+        2. Selected Subscription
+            1. Subscription Info Card
+            2. Related Customer (from 2.4: Modules/Views -> Customers)
+            3. Related Meter (from 2.5: Modules/Views -> Meters)
+            4. Related Device (from 2.6: Modules/Views -> Devices)
+            5. Address (from 1.14.1: Definitions -> Shared Entities -> Addresses)
+            6. Consumption History Chart
+                1. Total
+                2. By Meter
+                3. By Device
         3. Create/Update Page/Dialog/Form
-            1. Name/s
-            2. Surname
-            3. Phone number
-            4. Email
-            5. TC ID No
-            6. Tenants list (from 10.1)
-                1. If a tenant is selected, select roles from a popup
-            7. Existed tenants list (read-only)
-    3. Roles & Permissions Matrix
-        1. Platform Admin (All Permissions)
-        2. Tenant Admin (meter.*, user.*, customer.* permissions (Only within their Tenant). Cannot tenant.delete)
-        3. Operator (meter.create, meter.read, meter.update, reading.read, Cannot delete)
-        4. Viewer (*.read)
-        5. Field Engineer (meter.update (Installation date, location), meter.read)
-11. Devices
-    1. Tenants
-    2. Serial No
-    3. Related meter
-    4. Device Statuses (from 6.16: -> Definitions -> Device Statuses)
-    5. Device Profiles (from 12: Device Profiles)
-    6. Dynamic fields (from 12.3: Device Profiles -> Communication Technologies)
-12. Device Profiles
-    1. Device Brand (from 13)
-    2. Model Code (Device Brand + Model Code must be unique)
-    3. Communication Technologies (from 6.8: Definitions -> Communication Technologies)
-        1. Sigfox
-            1. Fields (Must be dynamically added while adding meters)(from 6.8.1.1: Definitions -> Communication technologies -> Sigfox -> Fields while adding meters)
-            2. Decoder function (JS expressions)
-        2. LoRaWAN
-            1. Fields (Must be dynamically added while adding meters)(from 6.8.2: Definitions -> Communication technologies -> LoRaWAN -> Fields while adding meters)
-            2. Decoder function (JS expressions)
-        3. NB-IoT
-            1. Fields (Must be dynamically added while adding meters)(from 6.8.2: Definitions -> Communication technologies -> LoRaWAN -> Fields while adding meters)
-            2. Decoder function (JS expressions)
-        4. …
-        5. …
-        6. …
-        7. …
-        8. …
-        9. …
-    4. Battery Life (If communication module is not none)
-13. Device Brands
-    1. Una
-    2. Ima
-    3. Itron
-    4. Zenner
-
+            1. Tenant
+            2. ID
+            3. Address (to 1.14.1: Definitions -> Shared Entities -> Addresses)
+            4. Customer (from 3 -> Customer)
+            5. Meter (From 4 -> Meters)
+            6. Device (From 5 -> Devices)
+            7. Subscription Type (From 1.1: Definitions -> Subscription Types)
+            8. Subscription Group (From 1.15: Definitions -> Subscription Groups)
+            9. Customer
+                1. Select From Existing (from 2.4: Modules/Views -> Customers)
+                2. Create New
+                    1. Fields
+                        1. If 2.3.3.6 (Modules/Views -> Subscriptions -> Create/Update Page/Dialog/Form -> Subscription Type) is 1.1.1 (Definitions -> Subscription Types -> Individual)
+                            1. Name
+                            2. Surname
+                            3. TC ID No
+                            4. Phone number
+                            5. Email
+                            6. If Another Contact
+                                1. Contact name/s
+                                2. Contact surname
+                                3. Contact TC ID No
+                                4. Contact phone number
+                                5. Contact email
+                                6. Other details if needed
+                                7. Address (to 1.14.1 -> Definitions -> Shared Entities -> Addresses)
+                        2. If 2.3.3.6 (Modules/Views -> Subscriptions -> Create/Update Page/Dialog/Form -> Subscription Type) is 1.1.2 (Definitions -> Subscription Types -> Organizational)
+                            1. Organization name (full name)
+                            2. Tax ID
+                            3. Tax Office
+                            4. Contact name
+                            5. Contact surname
+                            6. Contact phone number
+                            7. Contact email
+                            8. Address (to 1.14.1 -> Definitions -> Shared Entities -> Addresses)
+    4. Customers
+        1. Dashboard
+            1. All customer table
+        2. Selected Customer Detail
+            1. Customer Info Card
+            2. Addresses List
+            3. Related Subscriptions Expandable Table
+                1. Address
+                2. Related Meter
+                3. Related Device
+            4. Consumption History Chart
+        3. Create/Update Page/Dialog/Form
+            1. Tenant
+            2. Name/s
+            3. Surname
+            4. TC ID No
+            5. Phone Number
+            6. Email
+    5. Meters (Assets)
+        1. Dashboard
+            1. All meters table (Filterable by Tenant, Status, Brand)
+        2. Selected meter detail
+            1. Technical Info Card (Brand, Model, Serial)
+            2. Address (from 2.3.2.5: Modules/Views -> Subscriptions -> Address)
+            3. Status & Connectivity Info (Signal Strength, Battery)
+            4. Valve Status (Open/Close - If applicable)
+            5. Reading History Chart
+        3. Create/Update Page/Dialog/Form
+            1. Tenant
+            2. Related Subscription (from 2.3: Modules/Views -> Subscriptions) (optional - may be added later)
+            3. Meter Profile (from 2.7.1: Definitions -> Profiles -> Meter Profiles) (Filtered by Tenant -> Allowed Profiles)
+            4. Serial No / ID
+            5. Initial Index
+            6. Installation Date (DD.MM.YYYY HH:mm:ss -> 08.12.2025 07:18:55)(24 hours and no am/pm)
+            7. Meter Status (from 1.8: Definitions -> Meter Statuses)
+            8. Tenant (from 2.8.1: IAM -> Modules/Views -> IAM -> Tenants)
+            9. Communication Module (Can overwrite the profile)
+            10. Device Configurations
+                1. None
+                2. Select From Inventory
+                3. Create New
+    6. Devices
+        1. Dashboard
+            1. All devices table
+        2. Selected device detail
+            1. Device Info Card
+            2. Address (from 2.3.2.5: Modules/Views -> Subscriptions -> Address)
+            3. Device Statuses
+            4. Reading History Table
+        3. Create/Update Page/Dialog/Form
+            1. Tenant (from 2.8.1: IAM -> Modules/Views -> IAM -> Tenants)
+            2. Related Meter (from 2.5: Modules/Views -> Meters) (Optional - may be added later)
+            3. Serial No / ID
+            4. Device Status (from 1.9: -> Definitions -> Device Statuses)
+            5. Device Profile (from 2.7.2: Definitions -> Profiles -> Device Profiles)
+            6. Dynamic fields (from 2.7.2.6: Device Profiles -> Communication Technologies)
+    7. Profiles
+        1. Meter Profiles
+            1. Brand (from 1.12: Definitions -> Meter Brands)
+            2. Model Code (Brand + Model Code must be unique)
+            3. Meter Type (from 1.2: Definitions -> Meter Types)
+            4. Dial Type (from 1.3: Definitions -> Dial Types)
+            5. Temperature Type (from 1.4: Definitions -> Temperature Types)
+            6. Mounting Type (from 1.5: Definitions -> Mounting Types)
+            7. Connection Type (from 1.6: Definitions -> Connection Types)
+            8. IP Rating (from 1.7: Definitions -> IP Ratings)
+            9. Diameter
+            10. Length
+            11. Width
+            12. Height
+            13. Q1 (Qmin)
+            14. Q2 (Qt)
+            15. Q3 (Qn)
+            16. Q4 (Qmax)
+            17. R Value (Can be automatically calculated from Q3/Q1 or can be written manually)
+            18. Pressure Loss
+            19. Communication Module (from 1.0: Definitions -> Communication Modules)
+            20. Compatible Device Profiles (From 2.7.2: Modules/Views -> Profiles -> Device Profiles)
+        2. Device Profiles
+            1. Device Brand (from 13)
+            2. Model Code (Device Brand + Model Code must be unique)
+            3. Messaging Scenarios
+            4. Battery Life (If communication module is not none)
+            5. Compatible Meter Profiles (From 2.7.1: Modules/Views -> Profiles -> Meter Profiles)
+            6. Communication Technologies (from 1.11: Definitions -> Communication Technologies)
+                1. Sigfox
+                    1. Fields (Must be dynamically added while adding meters)(from 1.11.1.1: Definitions -> Communication technologies -> Sigfox -> Fields while adding meters)
+                    2. Message Scenarios (from 2.7.2.3: Modules/Views -> Profiles -> Device Profiles -> Messaging Scenarios) (can be more than one)
+                        1. Decoder function (JS expressions)
+                2. LoRaWAN
+                    1. Fields (Must be dynamically added while adding meters)(from 1.11.2.1: Definitions -> Communication technologies -> LoRaWAN -> Fields while adding meters)
+                    2. Message Scenarios (from 2.7.2.3: Modules/Views -> Profiles -> Device Profiles -> Messaging Scenarios) (can be more than one)
+                        1. Decoder function (JS expressions)
+                3. NB-IoT
+                    1. Fields (Must be dynamically added while adding meters)(from 1.11.3.1: Definitions -> Communication technologies -> LoRaWAN -> Fields while adding meters)
+                    2. Message Scenarios (from 2.7.2.3: Modules/Views -> Profiles -> Device Profiles -> Messaging Scenarios) (can be more than one)
+                        1. Decoder function (JS expressions)
+                4. …
+                5. …
+                6. …
+                7. …
+                8. …
+                9. …
+    8. IAM
+        1. Tenants
+            1. Dashboard
+                1. Treetable (Tenant name)
+            2. Selected tenant details
+                1. Company Info Card (Name, Tax ID, Address)
+                2. Subscription Status (Active/Passive, Plan Type)
+                3. Summary Stats: (Total Users, Total Meters, Active Alarms)
+                4. Users list (List of users assigned to this tenant)
+                5. Allowed Profiles List (Which meter models they can use)
+            3. Create/Update Page/Dialog/Form
+                1. Parent Tenant (from 2.8.1: IAM -> Tenants)
+                2. Name
+                3. Contact name/s
+                4. Contact surname
+                5. Contact phone number
+                6. Contact email
+                7. Tax ID
+                8. Tax office
+                9. Tenant address (from 1.14.1: Definitions -> Shared Entities -> Addresses)
+                10. Users list (from 2.8.2)
+                    1. Select from existing
+                        1. Modules & Permissions Matrix
+                11. Existed users list (read-only)
+                12. Allowed meter profiles (from 5.1: Profiles -> Meter Profiles) (Multi-select)
+        2. Users
+            1. Dashboard
+                1. Table (User name/s + User Surname | Tenant Name)
+            2. Selected user details
+                1. User Info Card (Name, Email, Phone)
+                2. Activity Log (Last login, Last actions)
+                3. Assigned Tenants Table (Tenant Name | Role)
+            3. Create/Update Page/Dialog/Form
+                1. Name/s
+                2. Surname
+                3. Phone number
+                4. Email
+                5. TC ID No
+                6. Tenants list (from 2.8.1)
+                    1. Select from existing
+                        1. Modules & Permissions Matrix
+                7. Existed tenants list (read-only)
 Relations & Logic
 1. Tenants
     1. A tenant must have a parent tenant (if it is not the root tenant)
-    2. A tenant can have multiple child tenants
-    3. A tenant can have multiple customers
-    4. A tenant can have multiple users
-    5. Parent tenants can be able to manage child tenants
-    6. Child tenants must not be able to see its parent tenant or any same level sibling tenants.
-    7. Tenants can have multiple allowed meter profiles
+    2. “Una IoT” will be the one and only root tenant
+    3. A tenant can have multiple child tenants
+    4. A tenant can have multiple customers
+    5. A tenant can have multiple users
+    6. Parent tenants can be able to manage child tenants
+    7. Child tenants must not be able to see its parent tenant or any same level sibling tenants.
+    8. Tenants can have multiple allowed meter profiles
 2. Users
-    1. A user must be related with tenants
-    2. A user can be related with different tenants
-    3. A user must have at least and only 1 role for each tenant
-    4. An authorized user of a tenant can be able to manage all of its child tenants
-    5. A user must not be able to see its parent tenant or any of same level sibling tenants
+    1. iot@una.net.tr will be the default user with all permissions on all modules under “Una IoT” tenant
+    2. A user must be related with tenants
+    3. A user can be related with different tenants
+    4. A user may or may not have permissions for suitable tenants
+    5. An authorized user of a tenant can be able to manage all of its child tenants
+    6. A user must not be able to see its parent tenant or any of same level sibling tenants
+    7. A user can only access the views if the permissions are given, and cannot access the views if the permissions are not given
 3. Customers
     1. A customer must be related with at least and only 1 tenant
-    2. A customer can have n addresses
-    3. A customer can have n meters
-4. Meter Profiles
+    2. A customer can have n subscriptions
+4. Subscriptions
+    1. A subscription can be related with at least and only 1 customer (thus can only be related with only one tenant)
+    2. A subscription can have 1 linked meter at a time
+    3. A subscription can be related with n meters (a customer can change meters, e.g, old meters)
+5. Meter Profiles
     1. A meter profile can be consumed by multiple meters
     2. A meter profile view can be allowed for multiple tenants
     3. A meter profile can have multiple compatible device profiles
-5. Meters (Assets)
-    1. A meter must be related with at least and only 1 customer (thus can only be related with only one tenant)
-    2. A meter must be related with at least and only 1 meter profiles
-    3. A meter may or may not be related with device (If related, only 1)
-6. Device Profiles
+6. Meters (Assets)
+    1. A meter must be related with at least and only 1 tenant
+    2. A meter may or may not be related with a subscription
+    3. A meter must be related with at least and only 1 meter profiles
+    4. A meter may or may not be related with device (If related, only 1)
+7. Device Profiles
     1. A device profile can have multiple devices
     2. A device profile can have multiple compatible meter profiles
-7. Devices
+8. Devices
     1. A device must be related with at least and only 1 tenant
     2. A device may or may not be related with a meter (If related, only 1)
     3. A device must be related with at least 1 device profile
-
-Seed 1
+Seed
 1. Tenants
-    1. Root
+    1. Root (Una IoT)
         1. ASKİ (Ankara Su İdaresi)
         2. HATSU (Hatay Su İdaresi)
 2. Users
     1. Super Admin
-        1. First Name: Super
-        2. Last Name: Admin
-        3. Email: super.admin@example.com
-        4. password: Asdf1234.
+        1. Name: Una IoT
+        2. Surname: Super Admin
+        3. Email: iot@una.net.tr
+        4. Password: Asdf1234.
         5. Phone: +909998887766
         6. TC ID: 12345678901
-        7. Tenant:Role
-            1. Root:PlatformAdmin
+        7. Permissions:
+            1. Create+Read+Update+Delete->All Modules
     2. Aski Yetkili
         1. First Name: ASKİ
         2. Last Name: Yetkili
@@ -607,8 +585,8 @@ Seed 1
         4. password: Asdf1234.
         5. Phone: +908887776655
         6. TC ID: 12345678902
-        7. Tenant:Role
-            1. ASKİ:TenantAdmin
+        7. Permissions:
+            1. Create+Read+Update+Delete->All Modules
     3. Hatsu Yetkili
         1. First Name: HATSU
         2. Last Name: Yetkili
@@ -616,152 +594,65 @@ Seed 1
         4. password: Asdf1234.
         5. Phone: +907776665544
         6. TC ID: 12345678903
-        7. Tenant:Role
-            1. HATSU:TenantAdmin
-3. Meter Brands
-    1. Manas
-    2. Itron
-    3. Baylan
-    4. Cem
-    5. Klepsan
-    6. Zenner
-4. Device Brands
-    1. Manas
-    2. Itron
-    3. Baylan
-    4. Cem
-    5. Klepsan
-    6. Ima
-    7. Codigno
-5. Profiles
-    1. (Total 10) {qty} Meter Profiles | Compatible Device Profiles | Viewable by Tenants (Root is default and must)
-        1. 2 Manas | Manas + Itron + Ima + Codigno | HATSU
-        2. 2 Itron | Manas + Itron + Ima + Codigno | HATSU + ASKİ
-        3. 2 Baylan | Baylan + Ima | HATSU + ASKİ
-        4. 2 Zenner | Ima | HATSU
-        5. 1 Cem | Cem + Ima | HATSU
-        6. 1 Klepsan | Klepsan + Ima | HATSU
-    2. (Total 7) {qty} Device Profiles | Compatible Meter Profiles | Viewable by Tenants
-        1. 1 Manas | Manas + Itron | HATSU + ASKİ
-        2. 1 Itron | Manas + Itron | HATSU + ASKİ
-        3. 1 Baylan | Baylan | HATSU + ASKİ
-        4. 1 Cem | Cem | HATSU
-        5. 1 Klepsan | Klepsan | HATSU
-        6. 1 Ima | Manas + Itron + Baylan + Zenner + Cem + Klepsan | HATSU + ASKİ
-        7. 1 Codigno | Manas + Itron | HATSU + ASKİ
-6. Meters + Devices:
-    1. HATSU -> {qty} | meter profile[i] + device profile
-        1. 100 | Itron[0] + Itron
-        2. 50.000 | Baylan[0] + Baylan
-        3. 10.000 | Zenner[0] + Ima
-        4. 10.000 | Klepsan + Klepsan
-    2. ASKİ -> {qty} | meter profile[i] + device profile
-        1. 1.000 | Manas[0] + Itron
-        2. 100 | Manas[0] + Ima
-        3. 1.000 | Manas[1] + Itron
-        4. 100 | Manas[1] + Ima
-        5. 1.000 | Itron[0] + Itron
-        6. 100 | Itron[0] + Ima
-        7. 1.000 | Itron[1] + Itron
-        8. 100 | Itron[1] + Ima
-        9. 1.000 | Baylan[0] + Baylan
-        10. 1.000 | Baylan[1] + Baylan
-        11. 1.000 | Zenner[0] + Ima
-        12. 1.000 | Zenner[1] + Ima
-        13. 1.000 | Cem[0] + Cem
-7. Customer - Tenant
-    1. Kemalettin ŞAHİN - ASKİ
-        1. Meter 1 Address: Tepebaşı Mahallesi, Foça Sokak, No: 100/2, Keçiören/ANKARA, Türkiye (06390)
-        2. Meter 2 Address: Ehlibeyt Mahallesi, Tekstilciler Caddesi, No: 16/4, Çankaya/ANKARA, Türkiye (06520)
-    2. Realistic Random - Realistic Random (from 6: Meters + Devices)
-8. Live readings: Realistic Random (24 readings / day * 3 months * All devices)
-Seed 2
-1. Tenants
-    1. Root
-        1. ASKİ (Ankara Su İdaresi)
-        2. HATSU (Hatay Su İdaresi)
-2. Users
-    1. Super Admin
-        1. First Name: Super
-        2. Last Name: Admin
-        3. Email: super.admin@example.com
-        4. password: Asdf1234.
-        5. Phone: +909998887766
-        6. TC ID: 12345678901
-        7. Tenant:Role
-            1. Root:PlatformAdmin
-    2. Aski Yetkili
-        1. First Name: ASKİ
-        2. Last Name: Yetkili
-        3. Email: aski.yetkili@example.com
-        4. password: Asdf1234.
-        5. Phone: +908887776655
-        6. TC ID: 12345678902
-        7. Tenant:Role
-            1. ASKİ:TenantAdmin
-    3. Hatsu Yetkili
-        1. First Name: HATSU
-        2. Last Name: Yetkili
-        3. Email: hatsu.yetkili@example.com
-        4. password: Asdf1234.
-        5. Phone: +907776665544
-        6. TC ID: 12345678903
-        7. Tenant:Role
-            1. HATSU:TenantAdmin
-3. Meter Brands
-    1. Manas
-    2. Itron
-    3. Baylan
-    4. Cem
-    5. Klepsan
-    6. Zenner
-4. Device Brands
-    1. Manas
-    2. Itron
-    3. Baylan
-    4. Cem
-    5. Klepsan
-    6. Ima
-    7. Codigno
-5. Profiles
-    1. (Total 10) {qty} Meter Profiles | Compatible Device Profiles | Viewable by Tenants (Root is default and must)
-        1. 2 Manas | Manas + Itron + Ima + Codigno | HATSU
-        2. 2 Itron | Manas + Itron + Ima + Codigno | HATSU + ASKİ
-        3. 2 Baylan | Baylan + Ima | HATSU + ASKİ
-        4. 2 Zenner | Ima | HATSU
-        5. 1 Cem | Cem + Ima | HATSU
-        6. 1 Klepsan | Klepsan + Ima | HATSU
-    2. (Total 7) {qty} Device Profiles | Compatible Meter Profiles | Viewable by Tenants
-        1. 1 Manas | Manas + Itron | HATSU + ASKİ
-        2. 1 Itron | Manas + Itron | HATSU + ASKİ
-        3. 1 Baylan | Baylan | HATSU + ASKİ
-        4. 1 Cem | Cem | HATSU
-        5. 1 Klepsan | Klepsan | HATSU
-        6. 1 Ima | Manas + Itron + Baylan + Zenner + Cem + Klepsan | HATSU + ASKİ
-        7. 1 Codigno | Manas + Itron | HATSU + ASKİ
-6. Meters + Devices:
-    1. HATSU -> {qty} | meter profile[i] + device profile
-        1. 100 | Itron[0] + Itron
-        2. 100 | Baylan[0] + Baylan
-        3. 100 | Zenner[0] + Ima
-        4. 100 | Klepsan + Klepsan
-    2. ASKİ -> {qty} | meter profile[i] + device profile
-        1. 100 | Manas[0] + Itron
-        2. 100 | Manas[0] + Ima
-        3. 100 | Manas[1] + Itron
-        4. 100 | Manas[1] + Ima
-        5. 100 | Itron[0] + Itron
-        6. 100 | Itron[0] + Ima
-        7. 100 | Itron[1] + Itron
-        8. 100 | Itron[1] + Ima
-        9. 100 | Baylan[0] + Baylan
-        10. 100 | Baylan[1] + Baylan
-        11. 100 | Zenner[0] + Ima
-        12. 100 | Zenner[1] + Ima
-        13. 100 | Cem[0] + Cem
-7. Customer - Tenant
-    1. Kemalettin ŞAHİN - ASKİ
-        1. Meter 1 Address - Lat, Lig: Tepebaşı Mahallesi, Foça Sokak, No: 100/2, Keçiören/ANKARA, Türkiye (06390) - 39.99451679511336, 32.86308219026244
-        2. Meter 2 Address: Ehlibeyt Mahallesi, Tekstilciler Caddesi, No: 16/4, Çankaya/ANKARA, Türkiye (06520) - 39.89441311052211, 32.81460781844764
-    2. Realistic Random - Realistic Random (from 6: Meters + Devices)
-8. Live readings: Realistic Random (24 readings / day * 45 days * All devices)
+        7. Permissions:
+            1. Create+Read+Update+Delete->All Modules
+3. Brands
+    1. Meter Brands
+        1. Baylan
+        2. Manas
+        3. Itron
+        4. Klepsan
+        5. Cem
+        6. Zenner
+        7. Türkoğlu
+        8. Bereket
+        9. Teksan
+    2. Device Brands
+        1. Ima
+        2. Itron
+        3. Manas
+        4. Inodya
+        5. Zenner
+        6. Baylan
+        7. Cem
+        8. Klepsan
+4. Profiles
+    1. (Total 10) Quantity | Meter Profiles | Compatible Device Profiles | Viewable by Tenants (Root is default and must)
+        1. 2 | Manas | Manas + Itron + Ima + Inodya | HATSU
+        2. 2 | Itron | Manas + Itron + Ima + Inodya | ASKİ + HATSU
+        3. 2 | Baylan | Baylan + IMA | ASKİ + HATSU
+        4. 2 | Zenner | Ima | HATSU
+        5. 1 | Cem | Cem + Ima | HATSU
+        6. 1 | Klepsan | Klepsan + Ima | HATSU
+    2. (Total 7) Quantity | Device Profiles | Compatible Meter Profiles | Viewable by Tenants (Root is default and must)
+        1. 1 | Manas | Manas + Itron | HATSU + ASKİ
+        2. 1 | Itron | Itron | HATSU + ASKİ
+        3. 1 | Baylan | Baylan | HATSU + ASKİ
+        4. 1 | Cem | Cem | HATSU
+        5. 1 | Klepsan | Klepsan | HATSU
+        6. 1 | Ima | Baylan + Manas + Itron + Klepsan + Cem + Zenner + Türkoğlu + Bereket + Teksan | HATSU + ASKİ
+        7. 1 | Inodya | Manas + Itron | HATSU + ASKİ
+5. Customers
+    1. ASKİ
+        1. 100
+    2. HATSU
+        1. 64
+6. Subscriptions
+    1. ASKİ
+        1. 128
+    2. HATSU
+        1. 50
+7. Meters
+    1. ASKİ
+        1. 100
+    2. HATSU
+        1. 50
+8. Devices
+    1. ASKİ
+        1. 100
+    2. HATSU
+        1. 50
+9. Live Readings
+    1. All devices
+    2. 45 days
+    3. 24 Messages per day
